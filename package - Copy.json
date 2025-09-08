@@ -10,23 +10,15 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.2",
-    "rollup": "^4.24.0",
-    "vite": "^5.4.8"
+    "@vitejs/plugin-react": "^5.0.2",
+    "vite": "^7.1.4"
   },
   "overrides": {
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "rollup": "^4.24.0"
-  },
-  "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.24.0"
-  },
-  "engines": {
-    "node": "18.x"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }
