@@ -1,0 +1,311 @@
+// Seat Map Designer Add‑on (Pins on Real Layout)
+// -----------------------------------------------------------------------------
+// This file adds a visual designer to place each seat as a draggable pin on top
+// of your real seating map image. It saves coordinates in Supabase (seat_coords)
+// and the main app reads them automatically in Map Mode.
+//
+// Usage
+// 1) Apply the SQL at the bottom in Supabase (coords table + settings table).
+// 2) Add this file as src/SeatMapDesigner.jsx
+// 3) Patch App.jsx with the snippet shown below (search "// PATCH INSTRUCTIONS").
+// 4) In the app (Admin): open "Map Designer", paste a public image URL of your
+//    seating diagram, then click to place or drag pins for each seat.
+// 5) Toggle Map Mode to see the live overlay everywhere.
+// -----------------------------------------------------------------------------
+
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnon = import.meta.env.VITE_SUPABASE_ANON_KEY
+const sb = (supabaseUrl && supabaseAnon) ? createClient(supabaseUrl, supabaseAnon) : null
+const k = (r,s)=> `${r}#${s}`
+
+export default function SeatMapDesigner(){
+  const [loading, setLoading] = useState(true)
+  const [rows, setRows] = useState([])
+  const [seats, setSeats] = useState([]) // [{row, seat}]
+  const [coords, setCoords] = useState({}) // key -> {x,y}
+  const [imgUrl, setImgUrl] = useState('')
+  const [canvasSize, setCanvasSize] = useState({ w: 1200, h: 800 })
+
+  const [selRow, setSelRow] = useState('')
+  const [selSeat, setSelSeat] = useState('')
+  const [autoInc, setAutoInc] = useState(true)
+
+  // drag state
+  const drag = useRef({ key:null, dx:0, dy:0, startX:0, startY:0 })
+  const planeRef = useRef(null)
+
+  useEffect(()=>{
+    (async()=>{
+      if(!sb){ setLoading(false); return }
+      // Load catalog (for seat list)
+      const { data: catalog } = await sb.from('seat_catalog').select('*')
+      const rows = Array.from(new Set((catalog||[]).map(c=>c.row_label))).sort((a,b)=> colNum(a)-colNum(b))
+      const seats = (catalog||[]).map(c => ({ row:c.row_label, seat:c.seat_number }))
+      setRows(rows); setSeats(seats)
+      // Load existing coordinates
+      const { data: cs } = await sb.from('seat_coords').select('*')
+      const map = {}; (cs||[]).forEach(c => { map[k(c.row_label, c.seat_number)] = { x:c.x, y:c.y } })
+      setCoords(map)
+      // Load image URL and canvas size from settings (optional)
+      const { data: settings } = await sb.from('app_settings').select('*')
+      const sMap = new Map((settings||[]).map(s => [s.key, s.value]))
+      if(sMap.get('map_image_url')) setImgUrl(sMap.get('map_image_url'))
+      const cw = Number(sMap.get('map_canvas_w')||'1200'); const ch = Number(sMap.get('map_canvas_h')||'800')
+      setCanvasSize({ w: cw, h: ch })
+      setLoading(false)
+    })()
+  },[])
+
+  const placedCount = useMemo(()=> Object.keys(coords).length, [coords])
+  const totalSeats = useMemo(()=> seats.length, [seats])
+
+  function colNum(col){ return String(col).toUpperCase().split('').reduce((n,c)=> n*26 + (c.charCodeAt(0)-64), 0) }
+
+  async function saveSettings(){
+    if(!sb) return alert('Add Supabase keys')
+    const rows = [
+      { key:'map_image_url', value: imgUrl },
+      { key:'map_canvas_w', value: String(canvasSize.w) },
+      { key:'map_canvas_h', value: String(canvasSize.h) },
+    ]
+    for(const r of rows){ await sb.from('app_settings').upsert(r, { onConflict:'key' }) }
+    alert('Saved map settings')
+  }
+
+  function onPlaneClick(e){
+    if(!selRow || !selSeat) return alert('Choose Row and Seat first')
+    const rect = planeRef.current.getBoundingClientRect()
+    const x = Math.round((e.clientX - rect.left))
+    const y = Math.round((e.clientY - rect.top))
+    const key = k(selRow, Number(selSeat))
+    setCoords(prev => ({ ...prev, [key]: { x, y } }))
+    if(autoInc){ setSelSeat(s => Number(s||0)+1) }
+  }
+
+  function onMouseDown(e, key){
+    e.preventDefault();
+    const rect = planeRef.current.getBoundingClientRect()
+    drag.current = { key, startX:e.clientX, startY:e.clientY, dx: coords[key].x - (e.clientX-rect.left), dy: coords[key].y - (e.clientY-rect.top) }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }
+  function onMouseMove(e){
+    const { key, dx, dy } = drag.current; if(!key) return
+    const rect = planeRef.current.getBoundingClientRect()
+    const x = Math.round((e.clientX - rect.left) + dx)
+    const y = Math.round((e.clientY - rect.top) + dy)
+    setCoords(prev => ({ ...prev, [key]: { x, y } }))
+  }
+  function onMouseUp(){ drag.current = { key:null, dx:0, dy:0, startX:0, startY:0 }; window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp) }
+
+  async function saveAll(){
+    if(!sb) return alert('Add Supabase keys')
+    const rows = Object.entries(coords).map(([key, v])=>{ const [row, seat] = key.split('#'); return { row_label: row, seat_number: Number(seat), x: v.x, y: v.y } })
+    for(let i=0;i<rows.length;i+=500){
+      const batch = rows.slice(i,i+500)
+      const { error } = await sb.from('seat_coords').upsert(batch, { onConflict:'row_label,seat_number' })
+      if(error){ return alert('Save error: '+error.message) }
+    }
+    alert('All coordinates saved')
+  }
+
+  function removeCurrent(){
+    if(!selRow || !selSeat) return
+    const key = k(selRow, Number(selSeat))
+    setCoords(prev=>{ const p={...prev}; delete p[key]; return p })
+  }
+
+  function exportCSV(){
+    const rows = [['Row','Seat','X','Y']]
+    for(const [key, {x,y}] of Object.entries(coords)){
+      const [row, seat] = key.split('#'); rows.push([row, seat, x, y])
+    }
+    const csv = rows.map(r=>r.join(',')).join('\n')
+    const blob = new Blob([csv], { type:'text/csv' }); const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href=url; a.download='seat_coordinates.csv'; a.click(); URL.revokeObjectURL(url)
+  }
+
+  function importCSV(e){
+    const file = e.target.files?.[0]; if(!file) return
+    const reader = new FileReader(); reader.onload = ()=>{
+      const text = reader.result.toString(); const lines = text.split(/\r?\n/).filter(Boolean)
+      const head = lines.shift().split(',').map(s=>s.trim())
+      const idx = { Row: head.indexOf('Row'), Seat: head.indexOf('Seat'), X: head.indexOf('X'), Y: head.indexOf('Y') }
+      const map = {}
+      for(const line of lines){ const cols = line.split(','); const row = cols[idx.Row]; const seat = Number(cols[idx.Seat]); const x = Number(cols[idx.X]); const y = Number(cols[idx.Y]); if(row && Number.isFinite(seat) && Number.isFinite(x) && Number.isFinite(y)){ map[k(row, seat)] = { x, y } } }
+      setCoords(map)
+    }
+    reader.readAsText(file)
+  }
+
+  if(loading) return <div className="small">Loading designer…</div>
+
+  return (
+    <div style={{display:'grid', gap:12}}>
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+        <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:12}}>
+          <div style={{padding:'10px 12px', borderBottom:'1px solid #e5e7eb', fontWeight:600}}>Controls</div>
+          <div style={{padding:'10px 12px', display:'grid', gap:10}}>
+            <div>
+              <div className="small">Map Image URL (public)</div>
+              <input value={imgUrl} onChange={e=>setImgUrl(e.target.value)} placeholder="https://…/seating-map.png" style={{width:'100%', padding:8, border:'1px solid #e5e7eb', borderRadius:8}} />
+              <div className="small" style={{marginTop:6}}>Canvas size (px):</div>
+              <div style={{display:'flex', gap:8}}>
+                <input type="number" value={canvasSize.w} onChange={e=>setCanvasSize(s=>({...s, w:Number(e.target.value)||1200}))} style={{width:120, padding:8, border:'1px solid #e5e7eb', borderRadius:8}} />
+                <input type="number" value={canvasSize.h} onChange={e=>setCanvasSize(s=>({...s, h:Number(e.target.value)||800}))} style={{width:120, padding:8, border:'1px solid #e5e7eb', borderRadius:8}} />
+                <button onClick={saveSettings} style={{border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 10px', background:'#fff'}}>Save settings</button>
+              </div>
+            </div>
+            <div>
+              <div className="small">Pick Row & Seat, then click on the map to place a pin. Drag pins to adjust.</div>
+              <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                <select value={selRow} onChange={e=>setSelRow(e.target.value)} style={{padding:8, border:'1px solid #e5e7eb', borderRadius:8}}>
+                  <option value="">Row…</option>
+                  {rows.map(r=> <option key={r} value={r}>{r}</option>)}
+                </select>
+                <input value={selSeat} onChange={e=>setSelSeat(e.target.value)} placeholder="Seat…" style={{width:100, padding:8, border:'1px solid #e5e7eb', borderRadius:8}} />
+                <label style={{display:'flex', alignItems:'center', gap:6}}>
+                  <input type="checkbox" checked={autoInc} onChange={e=>setAutoInc(e.target.checked)} /> auto-increment seat
+                </label>
+                <button onClick={removeCurrent} style={{border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 10px', background:'#fff'}}>Remove current</button>
+              </div>
+            </div>
+            <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+              <button onClick={saveAll} style={{border:'1px solid #059669', borderRadius:8, padding:'8px 10px', background:'#10b981', color:'#fff'}}>Save coordinates</button>
+              <button onClick={exportCSV} style={{border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 10px', background:'#fff'}}>Export CSV</button>
+              <label style={{border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 10px', background:'#fff', cursor:'pointer'}}>
+                Import CSV
+                <input type="file" accept=".csv" onChange={importCSV} style={{display:'none'}} />
+              </label>
+              <div className="small" style={{marginLeft:'auto'}}>Placed: {placedCount}/{totalSeats}</div>
+            </div>
+          </div>
+        </div>
+        <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:12}}>
+          <div style={{padding:'10px 12px', borderBottom:'1px solid #e5e7eb', fontWeight:600}}>Legend</div>
+          <div style={{padding:'10px 12px', display:'flex', gap:10, alignItems:'center'}}>
+            <span className="seat available" style={{display:'inline-flex', width:24, height:24, alignItems:'center', justifyContent:'center'}}>#</span>
+            <span className="small">Seat pin (draggable)</span>
+          </div>
+          <div style={{padding:'0 12px 12px'}} className="small">
+            Tip: zoom your browser (Ctrl/Cmd + "+") to place pins precisely.
+          </div>
+        </div>
+      </div>
+
+      <div style={{background:'#fff', border:'1px solid #e5e7eb', borderRadius:12}}>
+        <div style={{padding:'10px 12px', borderBottom:'1px solid #e5e7eb', fontWeight:600}}>Designer Canvas</div>
+        <div ref={planeRef} onClick={onPlaneClick}
+             style={{position:'relative', width:canvasSize.w, height:canvasSize.h, margin:12, border:'1px dashed #e5e7eb', borderRadius:12, overflow:'hidden', background:'#fafafa'}}>
+          {imgUrl && (
+            <img src={imgUrl} alt="layout" style={{position:'absolute', left:0, top:0, width:canvasSize.w, height:canvasSize.h, objectFit:'contain', pointerEvents:'none', userSelect:'none'}} />
+          )}
+          {Object.entries(coords).map(([key, p])=>{
+            const [row, seat] = key.split('#')
+            return (
+              <button key={key}
+                      onMouseDown={(e)=>onMouseDown(e, key)}
+                      className="seat available"
+                      title={`Row ${row}, Seat ${seat}`}
+                      style={{position:'absolute', left:Math.max(0, Math.min(canvasSize.w-34, p.x-17)), top:Math.max(0, Math.min(canvasSize.h-34, p.y-17)), width:34, height:34}}>
+                {seat}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --------------------------- PATCH INSTRUCTIONS ------------------------------
+// In your existing src/App.jsx, do the following small edits:
+// 1) Add this import near the top:
+//    import SeatMapDesigner from './SeatMapDesigner.jsx'
+//
+// 2) Add a new state toggle (next to setup/mapMode states):
+//    const [mapDesigner, setMapDesigner] = useState(false)
+//
+// 3) Show a button in the header for admins only (where you render Admin UI):
+//    {isAdmin && <button onClick={()=>setMapDesigner(v=>!v)} className="ghost">{mapDesigner? 'Close Designer':'Map Designer'}</button>}
+//
+// 4) Load coordinates from DB on mount (so Map Mode uses them automatically):
+//    useEffect(()=>{
+//      (async()=>{
+//        if(!sb) return
+//        const { data } = await sb.from('seat_coords').select('*')
+//        const map = {}; (data||[]).forEach(c => { map[`${c.row_label}#${c.seat_number}`] = { x:c.x, y:c.y } })
+//        setCoords(map)
+//      })()
+//    },[])
+//
+// 5) In the main content area, render the designer when toggled (admin only):
+//    {isAdmin && mapDesigner ? (
+//       <SeatMapDesigner />
+//     ) : (
+//       /* existing seat grid / map mode UI */
+//     )}
+// -----------------------------------------------------------------------------
+
+// ----------------------------- SQL: ADD-ONS ----------------------------------
+/*
+-- 1) Coordinates table (pins)
+create table if not exists public.seat_coords (
+  row_label   text not null,
+  seat_number int  not null,
+  x           int  not null,
+  y           int  not null,
+  primary key (row_label, seat_number),
+  foreign key (row_label, seat_number) references public.seat_catalog(row_label, seat_number)
+    on update cascade on delete cascade
+);
+
+alter table public.seat_coords enable row level security;
+
+drop policy if exists coords_read on public.seat_coords;
+create policy coords_read on public.seat_coords for select using (true);
+
+drop policy if exists coords_write on public.seat_coords;
+create policy coords_write on public.seat_coords for insert with check (
+  exists (select 1 from admins a where a.email = auth.email())
+);
+
+drop policy if exists coords_update on public.seat_coords;
+create policy coords_update on public.seat_coords for update using (
+  exists (select 1 from admins a where a.email = auth.email())
+) with check (
+  exists (select 1 from admins a where a.email = auth.email())
+);
+
+drop policy if exists coords_delete on public.seat_coords;
+create policy coords_delete on public.seat_coords for delete using (
+  exists (select 1 from admins a where a.email = auth.email())
+);
+
+-- 2) Simple settings key-value (for image URL + canvas size)
+create table if not exists public.app_settings (
+  key   text primary key,
+  value text
+);
+
+alter table public.app_settings enable row level security;
+
+drop policy if exists settings_read on public.app_settings;
+create policy settings_read on public.app_settings for select using (true);
+
+drop policy if exists settings_write on public.app_settings;
+create policy settings_write on public.app_settings for insert with check (
+  exists (select 1 from admins a where a.email = auth.email())
+);
+
+-- Upsert support for settings
+create or replace function public.settings_upsert() returns trigger as $$
+begin
+  insert into public.app_settings(key, value) values (new.key, new.value)
+  on conflict (key) do update set value = excluded.value;
+  return new;
+end; $$ language plpgsql;
+*/
