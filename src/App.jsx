@@ -14,6 +14,12 @@ const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || '')
 
 const sb = (supabaseUrl && supabaseAnon) ? createClient(supabaseUrl, supabaseAnon) : null
 const HOLD_SECONDS = 300 // 5-minute soft hold
+const REDIRECT = import.meta.env.VITE_PUBLIC_REDIRECT_URL || window.location.origin;
+
+await sb.auth.signInWithOtp({
+  email,
+  options: { emailRedirectTo: REDIRECT }
+})
 
 // ---------- Helpers ----------
 const k = (r, s) => `${r}#${s}`
