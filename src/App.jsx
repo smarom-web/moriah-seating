@@ -477,10 +477,12 @@ export default function App(){
                 <input id="freeRow" placeholder="Row (e.g., LL)" style={{padding:8,border:'1px solid #e5e7eb',borderRadius:8}}/>
                 <input id="freeSeat" placeholder="Seat (e.g., 17)" style={{padding:8,border:'1px solid #e5e7eb',borderRadius:8}}/>
                 <button onClick={()=>{
-                  const row = (document.getElementById('freeRow') as HTMLInputElement).value.trim().toUpperCase()
-                  const seat = Number((document.getElementById('freeSeat') as HTMLInputElement).value.trim())
-                  if(!row || !Number.isFinite(seat)) return alert('Enter row and seat')
-                  freeSeat(row, seat)
+                    const rowEl  = document.getElementById('freeRow')
+  const seatEl = document.getElementById('freeSeat')
+  const row  = rowEl  ? String(rowEl.value).trim().toUpperCase() : ''
+  const seat = seatEl ? Number(String(seatEl.value).trim()) : NaN
+  if (!row || !Number.isFinite(seat)) { alert('Enter row and seat'); return }
+  freeSeat(row, seat)
                 }} style={{border:'1px solid #e5e7eb',borderRadius:8,padding:'8px 10px',background:'#fff'}}>Clear</button>
               </div>
             </div>
