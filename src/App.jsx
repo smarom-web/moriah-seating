@@ -16,10 +16,7 @@ const sb = (supabaseUrl && supabaseAnon) ? createClient(supabaseUrl, supabaseAno
 const HOLD_SECONDS = 300 // 5-minute soft hold
 const REDIRECT = import.meta.env.VITE_PUBLIC_REDIRECT_URL || window.location.origin;
 
-await sb.auth.signInWithOtp({
-  email,
-  options: { emailRedirectTo: REDIRECT }
-})
+
 
 // ---------- Helpers ----------
 const k = (r, s) => `${r}#${s}`
@@ -81,6 +78,7 @@ export default function App() {
   const signIn = async (email) => {
     if (!sb) return alert('Add Supabase keys to enable auth.')
     if (!email) return alert('Enter an email')
+		
     const { error } = await sb.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: window.location.origin }
