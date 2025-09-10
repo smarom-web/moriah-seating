@@ -24,7 +24,7 @@ function splitSeats(nums) {
 }
 
 // ---------- Layout profile (for your 1280×720 image) ----------
-const SEAT_SIZE = 34
+const SEAT_SIZE = 20
 const ROW_PAD   = 18
 const COL_PAD   = 18
 

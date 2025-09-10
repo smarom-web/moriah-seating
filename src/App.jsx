@@ -43,22 +43,39 @@ export default function App() {
   const [mapMode, setMapMode] = useState(false)
   const [mapDesigner, setMapDesigner] = useState(false) // <— new
 
+
+
   // Auth
   const [user, setUser] = useState(null)
-  const [isAdmin, setIsAdmin] = useState(false)
-  //const isAdmin = !!(user && ADMIN_EMAILS.includes((user.email || '').toLowerCase()))
+const [isAdmin, setIsAdmin] = useState(false)
 
 useEffect(() => {
-  let canceled = false
+  let cancelled = false
   ;(async () => {
-    if (!sb || !user) { if (!canceled) setIsAdmin(false); return }
-    const { data, error } = await sb.from('admins').select('email')
-    if (error) { console.error('admins check failed', error); if (!canceled) setIsAdmin(false); return }
+    if (!sb || !user) { if (!cancelled) setIsAdmin(false); return }
+
     const mine = (user.email || '').toLowerCase()
-    const ok = (data || []).some(a => (a.email || '').toLowerCase() === mine)
-    if (!canceled) setIsAdmin(ok)
+
+    // A) ENV list (works in Vercel if you set VITE_ADMIN_EMAILS)
+    const envList = (import.meta.env.VITE_ADMIN_EMAILS || '')
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean)
+    if (envList.includes(mine)) { if (!cancelled) setIsAdmin(true); return }
+
+    // B) DB list (fallback / preferred for production)
+    // We fetch the list (small table) and check client-side to avoid case-sensitivity issues.
+    try {
+      const { data, error } = await sb.from('admins').select('email')
+      if (error) { console.error('admins check failed:', error); if (!cancelled) setIsAdmin(false); return }
+      const ok = (data || []).some(a => (a.email || '').toLowerCase() === mine)
+      if (!cancelled) setIsAdmin(ok)
+    } catch (e) {
+      console.error('admins check exception:', e)
+      if (!cancelled) setIsAdmin(false)
+    }
   })()
-  return () => { canceled = true }
+  return () => { cancelled = true }
 }, [user])
 
   // UI state
@@ -190,7 +207,8 @@ useEffect(() => {
     if (!sb) { alert(`Parsed ${catalog.length} seats; ${pre.length} pre-reserved. Add Supabase keys to import.`); return }
 
     setLoading(true)
-    const { error: cErr } = await sb.from('seat_catalog').upsert(catalog, { onConflict: 'row_label,seat_number' })
+    const { error: cErr } = await sb.rpc('seat_catalog_upsert_many', { _items: catalog })
+if (error) { alert('Catalog import failed: ' + error.message); return }
     if (cErr) { console.error(cErr); alert('Catalog import failed (admin only): ' + cErr.message); setLoading(false); return }
 
     for (let i = 0; i < pre.length; i += 500) {
