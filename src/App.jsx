@@ -81,7 +81,7 @@ export default function App() {
 		
     const { error } = await sb.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin }
+      options: { emailRedirectTo: REDIRECT }
     })
     if (error) return alert('Sign-in error: ' + error.message)
     alert('Check your email for the magic link to sign in.')
