@@ -7,11 +7,6 @@ import SeatMapDesigner from './SeatMapDesigner.jsx' // <— new
 // ---------- Config ----------
 const supabaseUrl  = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnon = import.meta.env.VITE_SUPABASE_ANON_KEY
-const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || '')
-  .split(',')
-  .map(s => s.trim().toLowerCase())
-  .filter(Boolean)
-
 const sb = (supabaseUrl && supabaseAnon) ? createClient(supabaseUrl, supabaseAnon) : null
 const HOLD_SECONDS = 300 // 5-minute soft hold
 const REDIRECT = import.meta.env.VITE_PUBLIC_REDIRECT_URL || window.location.origin;
@@ -50,7 +45,21 @@ export default function App() {
 
   // Auth
   const [user, setUser] = useState(null)
-  const isAdmin = !!(user && ADMIN_EMAILS.includes((user.email || '').toLowerCase()))
+  const [isAdmin, setIsAdmin] = useState(false)
+  //const isAdmin = !!(user && ADMIN_EMAILS.includes((user.email || '').toLowerCase()))
+
+useEffect(() => {
+  let canceled = false
+  ;(async () => {
+    if (!sb || !user) { if (!canceled) setIsAdmin(false); return }
+    const { data, error } = await sb.from('admins').select('email')
+    if (error) { console.error('admins check failed', error); if (!canceled) setIsAdmin(false); return }
+    const mine = (user.email || '').toLowerCase()
+    const ok = (data || []).some(a => (a.email || '').toLowerCase() === mine)
+    if (!canceled) setIsAdmin(ok)
+  })()
+  return () => { canceled = true }
+}, [user])
 
   // UI state
   const [nameInput, setNameInput] = useState('')

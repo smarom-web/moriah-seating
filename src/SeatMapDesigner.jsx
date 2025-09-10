@@ -125,18 +125,13 @@ export default function SeatMapDesigner() {
 
   // ---- actions
   async function saveSettings() {
-    if (!sb) return alert('Add Supabase keys first.')
-    const rows = [
-      { key: 'map_image_url', value: imgUrl },
-      { key: 'map_canvas_w',  value: String(canvasSize.w) },
-      { key: 'map_canvas_h',  value: String(canvasSize.h) },
-    ]
-    for (const r of rows) {
-      const { error } = await sb.from('app_settings').upsert(r, { onConflict: 'key' })
-      if (error) return alert('Settings save failed: ' + error.message)
-    }
-    alert('Saved map settings.')
-  }
+  if (!sb) return alert('Add Supabase keys')
+  const keys   = ['map_image_url','map_canvas_w','map_canvas_h']
+  const values = [imgUrl, String(canvasSize.w), String(canvasSize.h)]
+  const { error } = await sb.rpc('app_settings_upsert_many', { _keys: keys, _values: values })
+  if (error) return alert('Settings save failed: ' + error.message)
+  alert('Saved map settings.')
+}
 
   function onPlaneClick(e) {
     if (!selRow || !selSeat) return alert('Choose Row + Seat first')
